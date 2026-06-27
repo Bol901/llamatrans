@@ -10,15 +10,15 @@ from __future__ import annotations
 import os
 import sys
 
-from PySide6.QtCore import Qt, QThread, Signal, QObject
+from PySide6.QtCore import Qt, QThread, Signal, QObject, QTimer, QRectF
 from PySide6.QtGui import (
     QAction, QFont, QTextDocument, QPageSize, QKeySequence, QIcon,
-    QTextCursor, QTextCharFormat,
+    QTextCursor, QTextCharFormat, QPainter, QPen, QColor,
 )
 from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
-    QTextEdit, QSplitter, QLabel, QLineEdit, QProgressBar, QFileDialog,
+    QTextEdit, QSplitter, QLabel, QLineEdit, QFileDialog,
     QMessageBox, QComboBox, QStatusBar, QFrame,
 )
 
@@ -57,109 +57,224 @@ def resolve_cjk_font() -> str:
     return candidates[0]
 
 
-STYLESHEET = """
-QMainWindow, QWidget#central {
-    background: #f4f5fb;
-}
-/* NOTE: deliberately no font-size here — a font-size on QWidget would
-   override QTextEdit.setFont() (stylesheet fonts win), breaking the per-pane
-   size controls. The base font is set via QApplication.setFont() instead. */
-QWidget { color: #1f2330; }
+_QSS_TEMPLATE = """
+QMainWindow, QWidget#central { background: @win_bg@; }
+/* No font-size on QWidget: it would override QTextEdit.setFont(). Base font
+   is set via QApplication.setFont() instead. */
+QWidget { color: @text@; }
 
-QMenuBar { background: #ffffff; border-bottom: 1px solid #e3e5ee; }
-QMenuBar::item:selected { background: #eef0fb; }
+QMenuBar { background: @menu_bg@; border-bottom: 1px solid @border@; }
+QMenuBar::item:selected { background: @menu_sel@; }
+QMenu { background: @card_bg@; color: @text@; border: 1px solid @border2@; }
+QMenu::item:selected { background: @menu_sel@; }
 
-QFrame#card {
-    background: #ffffff;
-    border: 1px solid #e3e5ee;
-    border-radius: 12px;
-}
+QFrame#card { background: @card_bg@; border: 1px solid @border@; border-radius: 12px; }
 
-QLabel#paneTitle {
-    font-size: 13px; font-weight: 600; color: #4b5563;
-    padding: 2px 2px 6px 2px;
-}
-QLabel#fieldLabel { color: #6b7280; font-size: 12px; }
+QLabel#paneTitle { font-size: 13px; font-weight: 600; color: @title@; padding: 2px 2px 6px 2px; }
+QLabel#fieldLabel { color: @subtle@; font-size: 12px; }
 
 QLineEdit, QComboBox {
-    background: #ffffff; border: 1px solid #d4d7e3; border-radius: 8px;
-    padding: 6px 10px; min-height: 18px; selection-background-color: #c7d2fe;
+    background: @input_bg@; border: 1px solid @border2@; border-radius: 8px;
+    padding: 6px 10px; min-height: 18px; color: @text@; selection-background-color: @sel@;
 }
-QLineEdit:focus, QComboBox:focus { border: 1px solid #6366f1; }
+QLineEdit:focus, QComboBox:focus { border: 1px solid @primary@; }
 QComboBox::drop-down { border: none; width: 22px; }
 QComboBox QAbstractItemView {
-    border: 1px solid #d4d7e3; background: #ffffff; selection-background-color: #eef0fb;
-    selection-color: #1f2330; outline: none;
+    border: 1px solid @border2@; background: @card_bg@; color: @text@;
+    selection-background-color: @menu_sel@; selection-color: @text@; outline: none;
 }
 
 QTextEdit {
-    background: #ffffff; border: 1px solid #e3e5ee; border-radius: 10px;
-    padding: 10px; selection-background-color: #c7d2fe;
+    background: @card_bg@; border: 1px solid @border@; border-radius: 10px;
+    padding: 10px; color: @text@; selection-background-color: @sel@;
 }
 
 QPushButton {
-    background: #ffffff; border: 1px solid #d4d7e3; border-radius: 9px;
-    padding: 8px 14px; font-weight: 600; color: #374151;
+    background: @btn_bg@; border: 1px solid @border2@; border-radius: 9px;
+    padding: 8px 14px; font-weight: 600; color: @btn_text@;
 }
-QPushButton:hover { background: #f0f1fa; border-color: #c2c6d6; }
-QPushButton:pressed { background: #e6e8f6; }
-QPushButton:disabled { color: #aab0bd; background: #f5f6fa; border-color: #e6e8f0; }
+QPushButton:hover { background: @btn_hover@; border-color: @btn_hoverb@; }
+QPushButton:pressed { background: @btn_press@; }
+QPushButton:disabled { color: @dis_text@; background: @dis_bg@; border-color: @dis_border@; }
 
-QPushButton#primary {
-    background: #6366f1; border: 1px solid #6366f1; color: #ffffff;
-}
-QPushButton#primary:hover { background: #5457e8; }
-QPushButton#primary:pressed { background: #4a4dd6; }
-QPushButton#primary:disabled { background: #c5c7f4; border-color: #c5c7f4; color: #ffffff; }
+QPushButton#primary { background: @primary@; border: 1px solid @primary@; color: #ffffff; }
+QPushButton#primary:hover { background: @primary_hover@; }
+QPushButton#primary:pressed { background: @primary_press@; }
+QPushButton#primary:disabled { background: @primary_dis@; border-color: @primary_dis@; color: #ffffff; }
 
-QPushButton#accent {
-    background: #10b981; border: 1px solid #10b981; color: #ffffff;
-}
-QPushButton#accent:hover { background: #0ea271; }
-QPushButton#accent:disabled { background: #b7e6d5; border-color: #b7e6d5; color: #ffffff; }
+QPushButton#accent { background: @accent@; border: 1px solid @accent@; color: #ffffff; }
+QPushButton#accent:hover { background: @accent_hover@; }
+QPushButton#accent:disabled { background: @accent_dis@; border-color: @accent_dis@; color: #ffffff; }
 
-QPushButton#danger { color: #b91c1c; border-color: #f0c4c4; }
-QPushButton#danger:hover { background: #fdeeee; }
+QPushButton#danger { color: @danger_text@; border-color: @danger_border@; background: @btn_bg@; }
+QPushButton#danger:hover { background: @danger_hover@; }
 
-QProgressBar {
-    background: #e9ebf5; border: none; border-radius: 7px; height: 14px;
-    text-align: center; color: #4b5563; font-size: 11px;
-}
-QProgressBar::chunk {
-    border-radius: 7px;
-    background: #6366f1;
-}
-
-QStatusBar { background: #ffffff; border-top: 1px solid #e3e5ee; color: #4b5563; }
+QStatusBar { background: @statusbar_bg@; border-top: 1px solid @border@; color: @subtle@; }
 QStatusBar::item { border: none; }
 
 QSplitter::handle { background: transparent; width: 10px; }
 
-QPushButton#toggle {
-    background: #ffffff; border: 1px solid #d4d7e3; color: #6b7280;
-}
-QPushButton#toggle:hover { background: #f0f1fa; }
-QPushButton#toggle:checked {
-    background: #eef0fe; border: 1px solid #6366f1; color: #4338ca;
-}
+QPushButton#toggle { background: @btn_bg@; border: 1px solid @border2@; color: @subtle@; }
+QPushButton#toggle:hover { background: @btn_hover@; }
+QPushButton#toggle:checked { background: @toggle_chk_bg@; border: 1px solid @primary@; color: @toggle_chk_text@; }
 
 QPushButton#fontBtn {
-    background: #f3f4fb; border: 1px solid #d4d7e3; border-radius: 7px;
-    padding: 0; font-weight: 700; font-size: 13px; color: #4b5563;
+    background: @fontbtn_bg@; border: 1px solid @border2@; border-radius: 7px;
+    padding: 0; font-weight: 700; font-size: 13px; color: @title@;
 }
-QPushButton#fontBtn:hover { background: #e8eafb; border-color: #6366f1; color: #4338ca; }
-QPushButton#fontBtn:pressed { background: #dadcf6; }
-QLabel#fontSize { color: #6b7280; font-size: 12px; font-weight: 600; }
+QPushButton#fontBtn:hover { background: @fontbtn_hover@; border-color: @primary@; color: @toggle_chk_text@; }
+QPushButton#fontBtn:pressed { background: @fontbtn_press@; }
+QLabel#fontSize { color: @subtle@; font-size: 12px; font-weight: 600; }
 
 QLabel#dropOverlay {
-    background: rgba(99, 102, 241, 0.10);
-    border: 2px dashed #6366f1;
-    border-radius: 16px;
-    color: #4338ca;
-    font-size: 22px;
-    font-weight: 700;
+    background: @drop_bg@; border: 2px dashed @primary@; border-radius: 16px;
+    color: @toggle_chk_text@; font-size: 22px; font-weight: 700;
 }
 """
+
+_PALETTES = {
+    "light": {
+        "win_bg": "#f4f5fb", "text": "#1f2330", "card_bg": "#ffffff",
+        "border": "#e3e5ee", "border2": "#d4d7e3", "subtle": "#6b7280",
+        "title": "#4b5563", "input_bg": "#ffffff", "sel": "#c7d2fe",
+        "menu_bg": "#ffffff", "menu_sel": "#eef0fb",
+        "btn_bg": "#ffffff", "btn_text": "#374151", "btn_hover": "#f0f1fa",
+        "btn_hoverb": "#c2c6d6", "btn_press": "#e6e8f6",
+        "dis_text": "#aab0bd", "dis_bg": "#f5f6fa", "dis_border": "#e6e8f0",
+        "statusbar_bg": "#ffffff", "toggle_chk_bg": "#eef0fe",
+        "toggle_chk_text": "#4338ca", "fontbtn_bg": "#f3f4fb",
+        "fontbtn_hover": "#e8eafb", "fontbtn_press": "#dadcf6",
+        "primary": "#6366f1", "primary_hover": "#5457e8", "primary_press": "#4a4dd6",
+        "primary_dis": "#c5c7f4", "accent": "#10b981", "accent_hover": "#0ea271",
+        "accent_dis": "#b7e6d5", "danger_text": "#b91c1c",
+        "danger_border": "#f0c4c4", "danger_hover": "#fdeeee",
+        "drop_bg": "rgba(99,102,241,0.10)",
+    },
+    "dark": {
+        "win_bg": "#15161b", "text": "#e6e7ea", "card_bg": "#23252e",
+        "border": "#343742", "border2": "#3d4150", "subtle": "#9aa0ad",
+        "title": "#b8bdc8", "input_bg": "#2c2f3a", "sel": "#3b3f8f",
+        "menu_bg": "#1d1f27", "menu_sel": "#2b2e3a",
+        "btn_bg": "#2c2f3a", "btn_text": "#d3d6de", "btn_hover": "#353948",
+        "btn_hoverb": "#474c5c", "btn_press": "#3d4252",
+        "dis_text": "#5b6070", "dis_bg": "#23252e", "dis_border": "#2e313c",
+        "statusbar_bg": "#1d1f27", "toggle_chk_bg": "#2f3358",
+        "toggle_chk_text": "#c7caff", "fontbtn_bg": "#2c2f3a",
+        "fontbtn_hover": "#353948", "fontbtn_press": "#3d4252",
+        "primary": "#6366f1", "primary_hover": "#5457e8", "primary_press": "#4a4dd6",
+        "primary_dis": "#3a3c6b", "accent": "#10b981", "accent_hover": "#0ea271",
+        "accent_dis": "#1c5645", "danger_text": "#f08a8a",
+        "danger_border": "#5e3a3a", "danger_hover": "#3a2a2a",
+        "drop_bg": "rgba(99,102,241,0.18)",
+    },
+}
+
+# ring colors per theme: (track, arc, text)
+_RING_COLORS = {
+    "light": ("#e3e5ee", "#6366f1", "#4b5563"),
+    "dark": ("#343742", "#7c7ff5", "#b8bdc8"),
+}
+
+
+def build_stylesheet(dark: bool) -> str:
+    qss = _QSS_TEMPLATE
+    for key, val in _PALETTES["dark" if dark else "light"].items():
+        qss = qss.replace(f"@{key}@", val)
+    return qss
+
+
+class CircularProgress(QWidget):
+    """Small ring progress: percentage in the center when determinate, a
+    spinning arc when indeterminate (e.g. while a model downloads)."""
+
+    def __init__(self, size: int = 46, parent=None):
+        super().__init__(parent)
+        self._min, self._max, self._value = 0, 100, 0
+        self._indeterminate = False
+        self._angle = 0
+        self.setFixedSize(size, size)
+        self._timer = QTimer(self)
+        self._timer.setInterval(33)
+        self._timer.timeout.connect(self._spin)
+        self._track = QColor("#e3e5ee")
+        self._arc = QColor("#6366f1")
+        self._textcol = QColor("#4b5563")
+        self.hide()  # shown only while active
+
+    def set_colors(self, track: str, arc: str, text: str):
+        self._track, self._arc, self._textcol = QColor(track), QColor(arc), QColor(text)
+        self.update()
+
+    # QProgressBar-compatible API so call sites barely change
+    def setRange(self, a: int, b: int):
+        self._min, self._max = a, b
+        self._set_indeterminate(a == 0 and b == 0)
+        self.show()
+
+    def setMaximum(self, m: int):
+        self._max = m
+        self._set_indeterminate(m == 0)
+        self.show()
+
+    def setValue(self, v: int):
+        self._value = v
+        self.update()
+
+    def idle(self):
+        """Stop and hide the ring (no active task)."""
+        self._timer.stop()
+        self._indeterminate = False
+        self.hide()
+
+    def setTextVisible(self, *_):  # no-op (kept for compatibility)
+        pass
+
+    def value(self):
+        return self._value
+
+    def maximum(self):
+        return self._max
+
+    def _set_indeterminate(self, on: bool):
+        self._indeterminate = on
+        if on and not self._timer.isActive():
+            self._timer.start()
+        elif not on:
+            self._timer.stop()
+        self.update()
+
+    def _spin(self):
+        self._angle = (self._angle + 9) % 360
+        self.update()
+
+    def paintEvent(self, _event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        m = 5
+        rect = QRectF(m, m, self.width() - 2 * m, self.height() - 2 * m)
+
+        track = QPen(self._track, 4)
+        track.setCapStyle(Qt.RoundCap)
+        p.setPen(track)
+        p.drawArc(rect, 0, 360 * 16)
+
+        arc = QPen(self._arc, 4)
+        arc.setCapStyle(Qt.RoundCap)
+        p.setPen(arc)
+        if self._indeterminate:
+            p.drawArc(rect, -self._angle * 16, 100 * 16)
+        else:
+            span = 0.0
+            if self._max > self._min:
+                span = (self._value - self._min) / (self._max - self._min)
+            span = max(0.0, min(1.0, span))
+            p.drawArc(rect, 90 * 16, -int(span * 360 * 16))
+            p.setPen(self._textcol)
+            f = self.font()
+            f.setPixelSize(int(self.height() * 0.30))
+            f.setBold(True)
+            p.setFont(f)
+            p.drawText(self.rect(), Qt.AlignCenter, f"{int(span * 100)}%")
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +390,7 @@ class MainWindow(QMainWindow):
         self.ocr_worker: OcrWorker | None = None
         self.md_mode = True              # render panes as Markdown
         self.source_text = ""            # current source as markdown/plain source
+        self.dark = False                # color theme
 
         # local llama.cpp backend
         self.backend_mode = "remote"     # "remote" | "local"
@@ -369,6 +485,10 @@ class MainWindow(QMainWindow):
         self.translate_btn.setEnabled(False)
         actions.addWidget(self.translate_btn)
 
+        # circular progress ring sits between 开始翻译 and 取消
+        self.progress = CircularProgress()
+        actions.addWidget(self.progress)
+
         self.cancel_btn = QPushButton("⏹  取消")
         self.cancel_btn.setObjectName("danger")
         self.cancel_btn.clicked.connect(self.cancel_translation)
@@ -395,6 +515,14 @@ class MainWindow(QMainWindow):
         self.save_txt_btn.clicked.connect(self.save_text)
         self.save_txt_btn.setEnabled(False)
         actions.addWidget(self.save_txt_btn)
+
+        self.theme_btn = QPushButton("🌙")
+        self.theme_btn.setObjectName("toggle")
+        self.theme_btn.setCheckable(True)
+        self.theme_btn.setFixedWidth(40)
+        self.theme_btn.setToolTip("切换深色 / 浅色主题")
+        self.theme_btn.toggled.connect(self._toggle_theme)
+        actions.addWidget(self.theme_btn)
         tc.addLayout(actions)
 
         root.addWidget(toolbar_card)
@@ -432,12 +560,6 @@ class MainWindow(QMainWindow):
         splitter.setSizes([580, 580])
         root.addWidget(splitter, 1)
 
-        # --- progress ---
-        self.progress = QProgressBar()
-        self.progress.setValue(0)
-        self.progress.setTextVisible(True)
-        root.addWidget(self.progress)
-
         self.setCentralWidget(central)
 
         # drag-and-drop: accept files dropped anywhere on the window
@@ -452,6 +574,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("就绪 — 打开或拖入文件")
 
         self._build_menu()
+        self._apply_theme()
 
     def _make_pane_header(self, title_text: str, which: str) -> QHBoxLayout:
         """Title on the left, [A− | size | A+] font controls on the right."""
@@ -538,6 +661,21 @@ class MainWindow(QMainWindow):
     def _set_source(self, text: str):
         self.source_text = text
         self._render_view(self.source_view, "source", text)
+
+    # -- theme ----------------------------------------------------------
+
+    def _apply_theme(self):
+        theme = "dark" if self.dark else "light"
+        app = QApplication.instance()
+        if app:
+            app.setStyleSheet(build_stylesheet(self.dark))
+        self.progress.set_colors(*_RING_COLORS[theme])
+        self.theme_btn.setText("☀" if self.dark else "🌙")
+        self.theme_btn.setToolTip("切换到浅色主题" if self.dark else "切换到深色主题")
+
+    def _toggle_theme(self, checked: bool):
+        self.dark = checked
+        self._apply_theme()
 
     def _toggle_md(self, checked: bool):
         # capture current target content so manual edits survive the switch
@@ -634,7 +772,9 @@ class MainWindow(QMainWindow):
 
     def _start_local_role(self, role: str):
         """Launch a local llama-server for a role on a background thread."""
-        self.progress.setRange(0, 0)  # busy
+        self.progress.setRange(0, 0)  # busy / spinning
+        self.progress.setToolTip("模型下载中…" if not self.llama.binary_available()
+                                 else "模型加载中…")
         self.llama_thread = QThread()
         self.llama_worker = LlamaStartWorker(self.llama, role)
         self.llama_worker.moveToThread(self.llama_thread)
@@ -651,8 +791,7 @@ class MainWindow(QMainWindow):
 
     def _on_llama_ready(self, role: str, base_url: str, model_id: str):
         self._teardown_llama_thread()
-        self.progress.setRange(0, 1)
-        self.progress.setValue(0)
+        self.progress.idle()
         self.local_ready[role] = True
         if role == "translation":
             self.translator.base_url = base_url
@@ -669,8 +808,7 @@ class MainWindow(QMainWindow):
 
     def _on_llama_error(self, role: str, message: str):
         self._teardown_llama_thread()
-        self.progress.setRange(0, 1)
-        self.progress.setValue(0)
+        self.progress.idle()
         self._pending_ocr_path = None
         self._set_busy(False)
         QMessageBox.critical(self, "本地引擎启动失败", message)
@@ -838,8 +976,7 @@ class MainWindow(QMainWindow):
 
     def _on_ocr_done(self, text: str):
         self._teardown_ocr_thread()
-        self.progress.setRange(0, 1)
-        self.progress.setValue(0)
+        self.progress.idle()
         self._set_busy(False)
 
         blocks = extractors.split_text_into_blocks(text)
@@ -860,8 +997,7 @@ class MainWindow(QMainWindow):
 
     def _on_ocr_error(self, message: str):
         self._teardown_ocr_thread()
-        self.progress.setRange(0, 1)
-        self.progress.setValue(0)
+        self.progress.idle()
         self._set_busy(False)
         self.source_view.clear()
         self.translate_btn.setEnabled(False)
@@ -911,8 +1047,7 @@ class MainWindow(QMainWindow):
         elif self.ocr_worker:
             self.ocr_worker.cancel()
             self._teardown_ocr_thread()
-            self.progress.setRange(0, 1)
-            self.progress.setValue(0)
+            self.progress.idle()
             self.source_view.clear()
             self._set_busy(False)
             self.statusBar().showMessage("已取消图片识别")
@@ -945,12 +1080,14 @@ class MainWindow(QMainWindow):
 
     def _on_error(self, message: str):
         self._teardown_thread()
+        self.progress.idle()
         self._set_busy(False)
         QMessageBox.critical(self, "翻译出错", message)
         self.statusBar().showMessage("翻译出错")
 
     def _on_finished(self):
         self._teardown_thread()
+        self.progress.idle()
         self._set_busy(False)
         has_output = bool(self.target_view.toPlainText().strip())
         self.save_pdf_btn.setEnabled(has_output)
@@ -1082,8 +1219,8 @@ def main():
     icon = _icon()
     if icon:
         app.setWindowIcon(icon)
-    app.setStyleSheet(STYLESHEET)
-    win = MainWindow()
+    app.setStyleSheet(build_stylesheet(False))
+    win = MainWindow()  # applies the theme itself
     win.show()
     sys.exit(app.exec())
 
