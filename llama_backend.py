@@ -18,6 +18,8 @@ import sys
 import time
 import requests
 
+import engine
+
 
 def app_dir() -> str:
     """Directory of the app (works in dev and inside a PyInstaller bundle)."""
@@ -99,14 +101,30 @@ class LlamaBackend:
     def _abs(self, rel: str) -> str:
         return rel if os.path.isabs(rel) else os.path.join(self.base, rel)
 
+    def _binary_candidates(self) -> list[str]:
+        """Possible llama-server locations: bundled next to the app, or the
+        user-data dir where it is auto-downloaded."""
+        name = engine.exe_name()
+        rel = self.config.get("server_binary", "llama/llama-server")
+        bundled = self._abs(rel)
+        if os.name == "nt" and not bundled.lower().endswith(".exe"):
+            bundled += ".exe"
+        downloaded = os.path.join(user_data_dir(), "llama", name)
+        return [bundled, downloaded]
+
     @property
     def server_binary(self) -> str:
-        rel = self.config.get("server_binary", "llama/llama-server")
-        path = self._abs(rel)
-        # add the platform-specific executable suffix if not already present
-        if os.name == "nt" and not path.lower().endswith(".exe"):
-            path += ".exe"
-        return path
+        for c in self._binary_candidates():
+            if os.path.exists(c):
+                return c
+        return self._binary_candidates()[-1]  # download target (user-data dir)
+
+    def ensure_engine(self, on_log=None):
+        """Download the engine into the user-data dir if not already present."""
+        if self.binary_available():
+            return
+        dest = os.path.join(user_data_dir(), "llama")
+        engine.download_engine(dest, on_log or (lambda _m: None))
 
     @property
     def models_dir(self) -> str:
@@ -127,7 +145,7 @@ class LlamaBackend:
     # -- availability ---------------------------------------------------
 
     def binary_available(self) -> bool:
-        return os.path.exists(self.server_binary)
+        return any(os.path.exists(c) for c in self._binary_candidates())
 
     def base_url(self, role: str) -> str | None:
         srv = self.servers.get(role)
@@ -168,10 +186,14 @@ class LlamaBackend:
             return existing.base_url
 
         if not self.binary_available():
-            raise LlamaBackendError(
-                f"未找到 llama-server，可执行文件应位于:\n{self.server_binary}\n"
-                "请先运行 setup_local.py 下载本地引擎。"
-            )
+            if on_log:
+                on_log("未找到本地引擎，开始下载…")
+            try:
+                self.ensure_engine(on_log)
+            except engine.EngineError as e:
+                raise LlamaBackendError(str(e)) from e
+            except Exception as e:  # noqa: BLE001
+                raise LlamaBackendError(f"引擎下载失败: {e}") from e
 
         cfg = self.role_cfg(role)
         os.makedirs(self.models_dir, exist_ok=True)

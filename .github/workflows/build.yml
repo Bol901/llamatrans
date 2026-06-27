@@ -20,36 +20,32 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: Download llama.cpp engine (Vulkan)
-        run: python setup_local.py
-
-      - name: Build with PyInstaller
+      - name: Build single-file exe
         run: >
-          pyinstaller --noconfirm --windowed --name Translator
+          pyinstaller --noconfirm --onefile --windowed --name Translator
           --icon icon.ico
           --add-data "icon.ico;."
           --add-data "icon.png;."
           --add-data "llama_config.json;."
           main.py
 
-      - name: Bundle llama engine next to the exe
+      - name: Rename
         shell: pwsh
-        run: Copy-Item -Recurse -Force llama dist/Translator/llama
+        run: Move-Item dist/Translator.exe Translator-windows-x64.exe
 
-      - name: Zip
-        shell: pwsh
-        run: Compress-Archive -Path dist/Translator/* -DestinationPath Translator-windows-x64.zip
+      # the llama.cpp engine is NOT bundled: the app auto-downloads it
+      # (and the models) to a user-data dir on first local-mode use.
 
       - uses: actions/upload-artifact@v4
         with:
           name: Translator-windows-x64
-          path: Translator-windows-x64.zip
+          path: Translator-windows-x64.exe
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: Translator-windows-x64.zip
+          files: Translator-windows-x64.exe
 
   macos:
     runs-on: macos-latest   # Apple Silicon (arm64)
@@ -62,8 +58,19 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: Download llama.cpp engine (Metal)
-        run: python setup_local.py
+      # llama.cpp ships no prebuilt macOS server binary, so build it (Metal).
+      - name: Build llama.cpp (Metal) from source
+        run: |
+          git clone --depth 1 https://github.com/ggml-org/llama.cpp
+          cmake -S llama.cpp -B llama.cpp/bld -DCMAKE_BUILD_TYPE=Release \
+            -DGGML_METAL=ON -DLLAMA_CURL=ON -DLLAMA_BUILD_SERVER=ON
+          cmake --build llama.cpp/bld -j --config Release
+          mkdir -p llama
+          cp llama.cpp/bld/bin/llama-server llama/
+          cp llama.cpp/bld/bin/*.dylib llama/ 2>/dev/null || true
+          cp llama.cpp/bld/bin/*.metal llama/ 2>/dev/null || true
+          cp llama.cpp/bld/bin/*.metallib llama/ 2>/dev/null || true
+          chmod +x llama/llama-server
 
       - name: Generate .icns icon
         run: |
@@ -80,7 +87,7 @@ jobs:
           sips -z 1024 1024 icon.png --out icon.iconset/icon_512x512@2x.png
           iconutil -c icns icon.iconset -o icon.icns
 
-      - name: Build with PyInstaller
+      - name: Build .app with PyInstaller
         run: >
           pyinstaller --noconfirm --windowed --name Translator
           --icon icon.icns
@@ -92,7 +99,7 @@ jobs:
       - name: Bundle llama engine inside the .app
         run: |
           cp -R llama "dist/Translator.app/Contents/MacOS/llama"
-          chmod -R +x "dist/Translator.app/Contents/MacOS/llama" || true
+          chmod -R +x "dist/Translator.app/Contents/MacOS/llama"
 
       - name: Zip .app
         run: ditto -c -k --keepParent dist/Translator.app Translator-macos-arm64.zip

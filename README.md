@@ -46,13 +46,14 @@ python setup_local.py        # 下载本机对应的 llama.cpp 引擎到 llama/
 然后在应用顶部把「后端」切到 **本地 (llama.cpp)**，国内用户把「下载源」选 **国内镜像** 或 **ModelScope**。
 首次会自动下载模型（翻译约 1GB，OCR 数 GB），之后秒开。
 
-### 打包成 exe
+### 打包成单文件 exe
 ```bash
 pip install -r requirements-dev.txt
-pyinstaller --noconfirm --windowed --name Translator --icon icon.ico \
+pyinstaller --noconfirm --onefile --windowed --name Translator --icon icon.ico \
   --add-data "icon.ico;." --add-data "icon.png;." --add-data "llama_config.json;." main.py
 ```
-打 tag（`v*`）后，GitHub Actions 会自动构建 Windows 版并发布到 Releases。
+得到单个 `dist/Translator.exe`，双击即用；本地引擎与模型会在首次使用本地后端时自动下载。
+打 tag（`v*`）后，GitHub Actions 会自动构建 **Windows 单文件 exe** 和 **macOS .app** 并发布到 Releases。
 
 ### 配置
 `llama_config.json` 可改：模型仓库、量化（`quant`）、端口、上下文长度、`-ngl`、下载源等。

@@ -622,23 +622,11 @@ class MainWindow(QMainWindow):
             self._sync_translator()
             self.statusBar().showMessage("已切换到远程后端 (LM Studio)")
         else:
-            if not self.llama.binary_available():
-                QMessageBox.warning(
-                    self, "未安装本地引擎",
-                    "未找到 llama-server，请先在项目目录运行:\n\n"
-                    "    python setup_local.py\n\n"
-                    "下载 Vulkan 版 llama.cpp 后再使用本地后端。",
-                )
-                self.backend_combo.blockSignals(True)
-                self.backend_combo.setCurrentIndex(0)
-                self.backend_combo.blockSignals(False)
-                self.backend_mode = "remote"
-                self.url_edit.setEnabled(True)
-                self.model_combo.setEnabled(True)
-                self.refresh_btn.setEnabled(True)
-                return
             self.translate_btn.setEnabled(False)
-            self.statusBar().showMessage("正在启动本地翻译模型（首次会下载，请耐心等待）…")
+            if self.llama.binary_available():
+                self.statusBar().showMessage("正在启动本地翻译模型（首次会下载模型，请耐心等待）…")
+            else:
+                self.statusBar().showMessage("正在下载本地引擎与模型（首次较久，请耐心等待）…")
             self._start_local_role("translation")
 
     def _on_source_changed(self, _index: int):
