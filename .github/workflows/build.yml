@@ -59,18 +59,25 @@ jobs:
         run: pip install -r requirements-dev.txt
 
       # llama.cpp ships no prebuilt macOS server binary, so build it (Metal).
+      # Only the server target, in parallel, with @loader_path rpath so the
+      # bundled dylibs are found next to the binary on the user's machine.
       - name: Build llama.cpp (Metal) from source
         run: |
           git clone --depth 1 https://github.com/ggml-org/llama.cpp
           cmake -S llama.cpp -B llama.cpp/bld -DCMAKE_BUILD_TYPE=Release \
-            -DGGML_METAL=ON -DLLAMA_CURL=ON -DLLAMA_BUILD_SERVER=ON
-          cmake --build llama.cpp/bld -j --config Release
+            -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON \
+            -DLLAMA_CURL=ON -DLLAMA_BUILD_SERVER=ON \
+            -DBUILD_SHARED_LIBS=ON \
+            -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+            -DCMAKE_INSTALL_RPATH='@loader_path'
+          cmake --build llama.cpp/bld --config Release \
+            --target llama-server --parallel $(sysctl -n hw.ncpu)
           mkdir -p llama
-          cp llama.cpp/bld/bin/llama-server llama/
-          cp llama.cpp/bld/bin/*.dylib llama/ 2>/dev/null || true
-          cp llama.cpp/bld/bin/*.metal llama/ 2>/dev/null || true
-          cp llama.cpp/bld/bin/*.metallib llama/ 2>/dev/null || true
-          chmod +x llama/llama-server
+          find llama.cpp/bld -name 'llama-server' -type f -exec cp {} llama/ \;
+          find llama.cpp/bld -name '*.dylib' -exec cp {} llama/ \;
+          chmod -R +x llama/
+          echo "--- bundled engine files ---"; ls -la llama/
+          ./llama/llama-server --version || true
 
       - name: Generate .icns icon
         run: |
