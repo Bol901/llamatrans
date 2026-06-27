@@ -32,6 +32,17 @@ def _resource(name: str) -> str:
     return os.path.join(base, name)
 
 
+def user_data_dir(appname: str = "llamatrans") -> str:
+    """Per-user writable data directory (for downloaded models)."""
+    if sys.platform == "win32":
+        root = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    elif sys.platform == "darwin":
+        root = os.path.expanduser("~/Library/Application Support")
+    else:
+        root = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(root, appname)
+
+
 class LlamaBackendError(Exception):
     pass
 
@@ -99,7 +110,13 @@ class LlamaBackend:
 
     @property
     def models_dir(self) -> str:
-        return self._abs(self.config.get("models_dir", "models"))
+        """Where models are downloaded/cached. Defaults to a user-writable dir
+        so installed (read-only) app bundles still work; an absolute path in the
+        config overrides this."""
+        cfg = self.config.get("models_dir", "")
+        if cfg and os.path.isabs(cfg):
+            return cfg
+        return os.path.join(user_data_dir(), "models")
 
     def role_cfg(self, role: str) -> dict:
         roles = self.config.get("roles", {})

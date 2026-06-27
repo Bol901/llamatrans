@@ -1,7 +1,7 @@
 {
   "_comment": "本地 llama.cpp 后端配置。模型由 llama-server 的 -hf 自动下载到 models_dir；下载源可在 huggingface / hf-mirror / modelscope 间切换或自动回退。",
   "server_binary": "llama/llama-server",
-  "models_dir": "models",
+  "models_dir": "",
   "ngl": 99,
   "host": "127.0.0.1",
   "download_source": "auto",

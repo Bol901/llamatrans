@@ -1,7 +1,7 @@
 """Convert a provided PNG (new_icon.png) into the app icon.ico + icon.png.
 
-Trims the white margin, squares it, and rounds the corners (transparent
-outside) so the tile looks clean on any background.
+Trims whitespace, centers the artwork on a rounded tile with padding, and makes
+the corners transparent so it looks clean on any background.
 """
 
 from __future__ import annotations
@@ -11,8 +11,10 @@ from PIL import Image, ImageDraw
 
 
 SRC = "new_icon.png"
-PAD = 0.0          # extra padding fraction after cropping (0 = tight)
-RADIUS_FRAC = 0.22  # corner radius as fraction of side
+S = 1024                 # output size
+CONTENT_FRAC = 0.82      # how much of the tile the artwork fills
+RADIUS_FRAC = 0.22       # corner radius as fraction of side
+BG = (255, 255, 255, 255)  # tile background (white)
 
 
 def _content_bbox(img: Image.Image):
@@ -22,7 +24,7 @@ def _content_bbox(img: Image.Image):
     w, h = rgb.size
     minx, miny, maxx, maxy = w, h, 0, 0
     found = False
-    step = max(1, min(w, h) // 400)
+    step = max(1, min(w, h) // 500)
     for y in range(0, h, step):
         for x in range(0, w, step):
             r, g, b = px[x, y]
@@ -37,30 +39,28 @@ def _content_bbox(img: Image.Image):
 
 def build():
     here = os.path.dirname(os.path.abspath(__file__))
-    src_path = os.path.join(here, SRC)
-    img = Image.open(src_path).convert("RGBA")
+    img = Image.open(os.path.join(here, SRC)).convert("RGBA")
+    img = img.crop(_content_bbox(img))
 
-    # crop to content
-    box = _content_bbox(img)
-    img = img.crop(box)
-
-    # square it (pad shorter side with transparency, centered)
+    # scale artwork to fit inside CONTENT_FRAC of the tile, preserving aspect
     w, h = img.size
-    side = max(w, h)
-    square = Image.new("RGBA", (side, side), (0, 0, 0, 0))
-    square.paste(img, ((side - w) // 2, (side - h) // 2))
-    img = square
+    target = int(S * CONTENT_FRAC)
+    scale = min(target / w, target / h)
+    art = img.resize((max(1, int(w * scale)), max(1, int(h * scale))),
+                     Image.LANCZOS)
 
-    # normalise to 1024
-    S = 1024
-    img = img.resize((S, S), Image.LANCZOS)
+    # rounded tile background
+    tile = Image.new("RGBA", (S, S), BG)
+    ox = (S - art.width) // 2
+    oy = (S - art.height) // 2
+    tile.paste(art, (ox, oy), art)
 
-    # rounded-corner alpha mask (transparent outside)
+    # round the corners (transparent outside)
     mask = Image.new("L", (S, S), 0)
-    d = ImageDraw.Draw(mask)
-    d.rounded_rectangle([0, 0, S - 1, S - 1], radius=int(S * RADIUS_FRAC), fill=255)
+    ImageDraw.Draw(mask).rounded_rectangle(
+        [0, 0, S - 1, S - 1], radius=int(S * RADIUS_FRAC), fill=255)
     out = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    out.paste(img, (0, 0), mask)
+    out.paste(tile, (0, 0), mask)
 
     png_path = os.path.join(here, "icon.png")
     ico_path = os.path.join(here, "icon.ico")

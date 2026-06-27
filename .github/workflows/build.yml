@@ -1,0 +1,109 @@
+name: Build
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Download llama.cpp engine (Vulkan)
+        run: python setup_local.py
+
+      - name: Build with PyInstaller
+        run: >
+          pyinstaller --noconfirm --windowed --name Translator
+          --icon icon.ico
+          --add-data "icon.ico;."
+          --add-data "icon.png;."
+          --add-data "llama_config.json;."
+          main.py
+
+      - name: Bundle llama engine next to the exe
+        shell: pwsh
+        run: Copy-Item -Recurse -Force llama dist/Translator/llama
+
+      - name: Zip
+        shell: pwsh
+        run: Compress-Archive -Path dist/Translator/* -DestinationPath Translator-windows-x64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Translator-windows-x64
+          path: Translator-windows-x64.zip
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Translator-windows-x64.zip
+
+  macos:
+    runs-on: macos-latest   # Apple Silicon (arm64)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Download llama.cpp engine (Metal)
+        run: python setup_local.py
+
+      - name: Generate .icns icon
+        run: |
+          mkdir -p icon.iconset
+          sips -z 16 16     icon.png --out icon.iconset/icon_16x16.png
+          sips -z 32 32     icon.png --out icon.iconset/icon_16x16@2x.png
+          sips -z 32 32     icon.png --out icon.iconset/icon_32x32.png
+          sips -z 64 64     icon.png --out icon.iconset/icon_32x32@2x.png
+          sips -z 128 128   icon.png --out icon.iconset/icon_128x128.png
+          sips -z 256 256   icon.png --out icon.iconset/icon_128x128@2x.png
+          sips -z 256 256   icon.png --out icon.iconset/icon_256x256.png
+          sips -z 512 512   icon.png --out icon.iconset/icon_256x256@2x.png
+          sips -z 512 512   icon.png --out icon.iconset/icon_512x512.png
+          sips -z 1024 1024 icon.png --out icon.iconset/icon_512x512@2x.png
+          iconutil -c icns icon.iconset -o icon.icns
+
+      - name: Build with PyInstaller
+        run: >
+          pyinstaller --noconfirm --windowed --name Translator
+          --icon icon.icns
+          --add-data "icon.ico:."
+          --add-data "icon.png:."
+          --add-data "llama_config.json:."
+          main.py
+
+      - name: Bundle llama engine inside the .app
+        run: |
+          cp -R llama "dist/Translator.app/Contents/MacOS/llama"
+          chmod -R +x "dist/Translator.app/Contents/MacOS/llama" || true
+
+      - name: Zip .app
+        run: ditto -c -k --keepParent dist/Translator.app Translator-macos-arm64.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Translator-macos-arm64
+          path: Translator-macos-arm64.zip
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Translator-macos-arm64.zip

@@ -82,8 +82,13 @@ python setup_local.py
 ```
 
 ### Platforms
-Code runs on **Windows / Linux / macOS**. Prebuilt binaries are provided for **Windows** (Releases).
-`setup_local.py` fetches the right llama.cpp build per OS (Vulkan on Win/Linux, Metal on macOS).
+Code runs on **Windows / Linux / macOS**. Prebuilt binaries are provided for **Windows (x64)** and
+**macOS (Apple Silicon / arm64)** under [Releases](../../releases). `setup_local.py` fetches the right
+llama.cpp build per OS (Vulkan on Win/Linux, Metal on macOS). Models download on first use to a
+per-user data dir (`%LOCALAPPDATA%\llamatrans` / `~/Library/Application Support/llamatrans`).
+
+> **macOS**: the app is unsigned, so on first launch right-click the app → **Open** (or run
+> `xattr -dr com.apple.quarantine Translator.app`) to bypass Gatekeeper.
 
 ---
 
