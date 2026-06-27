@@ -390,7 +390,8 @@ class MainWindow(QMainWindow):
         self.ocr_worker: OcrWorker | None = None
         self.md_mode = True              # render panes as Markdown
         self.source_text = ""            # current source as markdown/plain source
-        self.dark = False                # color theme
+        self.theme_mode = "auto"         # "auto" | "light" | "dark"
+        self.dark = False                # effective theme (computed)
 
         # local llama.cpp backend
         self.backend_mode = "remote"     # "remote" | "local"
@@ -516,12 +517,10 @@ class MainWindow(QMainWindow):
         self.save_txt_btn.setEnabled(False)
         actions.addWidget(self.save_txt_btn)
 
-        self.theme_btn = QPushButton("🌙")
+        self.theme_btn = QPushButton()
         self.theme_btn.setObjectName("toggle")
-        self.theme_btn.setCheckable(True)
-        self.theme_btn.setFixedWidth(40)
-        self.theme_btn.setToolTip("切换深色 / 浅色主题")
-        self.theme_btn.toggled.connect(self._toggle_theme)
+        self.theme_btn.setFixedWidth(44)
+        self.theme_btn.clicked.connect(self._cycle_theme)
         actions.addWidget(self.theme_btn)
         tc.addLayout(actions)
 
@@ -574,6 +573,13 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("就绪 — 打开或拖入文件")
 
         self._build_menu()
+        app = QApplication.instance()
+        if app:
+            try:  # follow OS theme changes when in auto mode (Qt 6.5+)
+                app.styleHints().colorSchemeChanged.connect(
+                    self._on_system_theme_changed)
+            except (AttributeError, RuntimeError):
+                pass
         self._apply_theme()
 
     def _make_pane_header(self, title_text: str, which: str) -> QHBoxLayout:
@@ -664,18 +670,42 @@ class MainWindow(QMainWindow):
 
     # -- theme ----------------------------------------------------------
 
+    def _system_is_dark(self) -> bool:
+        app = QApplication.instance()
+        try:
+            from PySide6.QtCore import Qt as _Qt
+            return app.styleHints().colorScheme() == _Qt.ColorScheme.Dark
+        except (AttributeError, RuntimeError):
+            return False
+
     def _apply_theme(self):
+        if self.theme_mode == "auto":
+            self.dark = self._system_is_dark()
+        else:
+            self.dark = self.theme_mode == "dark"
         theme = "dark" if self.dark else "light"
         app = QApplication.instance()
         if app:
             app.setStyleSheet(build_stylesheet(self.dark))
         self.progress.set_colors(*_RING_COLORS[theme])
-        self.theme_btn.setText("☀" if self.dark else "🌙")
-        self.theme_btn.setToolTip("切换到浅色主题" if self.dark else "切换到深色主题")
 
-    def _toggle_theme(self, checked: bool):
-        self.dark = checked
+        labels = {"auto": "🌓", "light": "☀", "dark": "🌙"}
+        tips = {
+            "auto": "主题：跟随系统（点击切到浅色）",
+            "light": "主题：浅色（点击切到深色）",
+            "dark": "主题：深色（点击切到跟随系统）",
+        }
+        self.theme_btn.setText(labels[self.theme_mode])
+        self.theme_btn.setToolTip(tips[self.theme_mode])
+
+    def _cycle_theme(self):
+        order = ["auto", "light", "dark"]
+        self.theme_mode = order[(order.index(self.theme_mode) + 1) % 3]
         self._apply_theme()
+
+    def _on_system_theme_changed(self, _scheme=None):
+        if self.theme_mode == "auto":
+            self._apply_theme()
 
     def _toggle_md(self, checked: bool):
         # capture current target content so manual edits survive the switch
