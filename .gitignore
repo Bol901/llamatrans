@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# PyInstaller build output
+build/
+dist/
+*.spec
+
+# Bundled runtime & models (downloaded, not committed)
+llama/
+models/
+weights/
+
+# Claude Code local config
+.claude/
+
+# Generated icon working file (keep icon.ico / icon.png)
+new_icon.png
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

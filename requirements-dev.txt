@@ -1,0 +1,4 @@
+# Build / packaging dependencies (not needed to run from source)
+-r requirements.txt
+pyinstaller>=6.0
+Pillow>=10.0        # used by make_icon.py / convert_icon.py

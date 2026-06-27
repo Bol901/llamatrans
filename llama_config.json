@@ -1,0 +1,32 @@
+{
+  "_comment": "本地 llama.cpp 后端配置。模型由 llama-server 的 -hf 自动下载到 models_dir；下载源可在 huggingface / hf-mirror / modelscope 间切换或自动回退。",
+  "server_binary": "llama/llama-server",
+  "models_dir": "models",
+  "ngl": 99,
+  "host": "127.0.0.1",
+  "download_source": "auto",
+  "endpoints": {
+    "huggingface": "",
+    "hf-mirror": "https://hf-mirror.com",
+    "modelscope": "https://www.modelscope.cn/"
+  },
+  "auto_order": ["huggingface", "hf-mirror", "modelscope"],
+  "roles": {
+    "translation": {
+      "hf": "tencent/Hy-MT2-1.8B-GGUF",
+      "ms": "Tencent-Hunyuan/Hy-MT2-1.8B-GGUF",
+      "quant": "Q4_K_M",
+      "port": 18081,
+      "ctx": 4096,
+      "extra": []
+    },
+    "ocr": {
+      "hf": "ggml-org/GLM-OCR-GGUF",
+      "ms": "",
+      "quant": "",
+      "port": 18082,
+      "ctx": 12000,
+      "extra": ["--flash-attn", "off"]
+    }
+  }
+}
