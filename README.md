@@ -22,8 +22,8 @@ A cross-platform desktop app that translates **PDF / Word / Markdown / plain-tex
 ### 两种后端
 | 后端 | 说明 |
 |------|------|
+| **本地 (llama.cpp)** | **默认**。内置 `llama-server`，无需外部服务，**完全离线**；首次翻译时按需下载引擎与模型 |
 | **远程 (LM Studio)** | 连接任意 OpenAI 兼容服务，默认 `http://localhost:1234` |
-| **本地 (llama.cpp)** | 内置 `llama-server`，无需外部服务，**完全离线** |
 
 本地模式的模型由 `llama-server` 用 `-hf` **首次自动下载**到 `models/`，已存在则直接加载。下载源可在
 **HuggingFace / 国内镜像(hf-mirror) / ModelScope** 间切换，`自动`模式会在 HuggingFace 不可达时自动改用镜像。

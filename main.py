@@ -393,13 +393,14 @@ class MainWindow(QMainWindow):
         self.theme_mode = "auto"         # "auto" | "light" | "dark"
         self.dark = False                # effective theme (computed)
 
-        # local llama.cpp backend
-        self.backend_mode = "remote"     # "remote" | "local"
+        # local llama.cpp backend (default)
+        self.backend_mode = "local"      # "remote" | "local"
         self.llama = LlamaBackend()
         self.llama_thread: QThread | None = None
         self.llama_worker: LlamaStartWorker | None = None
         self.local_ready: dict[str, bool] = {"translation": False, "ocr": False}
         self._pending_ocr_path: str | None = None
+        self._pending_translation = False
 
         self._build_ui()
         self._refresh_models()
@@ -581,6 +582,17 @@ class MainWindow(QMainWindow):
             except (AttributeError, RuntimeError):
                 pass
         self._apply_theme()
+
+        # default backend is local: reflect in the UI (server starts lazily on
+        # the first translation / OCR, so launch stays fast and download-free)
+        if self.backend_mode == "local":
+            self.backend_combo.blockSignals(True)
+            self.backend_combo.setCurrentIndex(self.backend_combo.findData("local"))
+            self.backend_combo.blockSignals(False)
+            self.url_edit.setEnabled(False)
+            self.model_combo.setEnabled(False)
+            self.refresh_btn.setEnabled(False)
+            self.source_combo.setEnabled(True)
 
     def _make_pane_header(self, title_text: str, which: str) -> QHBoxLayout:
         """Title on the left, [A− | size | A+] font controls on the right."""
@@ -828,6 +840,9 @@ class MainWindow(QMainWindow):
             self.translator.model = model_id or "local"
             self.translate_btn.setEnabled(bool(self.blocks))
             self.statusBar().showMessage(f"本地翻译模型就绪 ✓ ({base_url})")
+            if self._pending_translation:
+                self._pending_translation = False
+                self.start_translation()
         elif role == "ocr":
             self.translator.ocr_base_url = base_url
             self.translator.ocr_model = model_id or "glm-ocr"
@@ -1047,7 +1062,15 @@ class MainWindow(QMainWindow):
         if not self.blocks:
             return
         if self.backend_mode == "local" and not self.local_ready["translation"]:
-            self.statusBar().showMessage("本地翻译模型尚未就绪，请稍候…")
+            # lazily start the local server, then auto-resume translation
+            if self.llama_worker is None:
+                self._pending_translation = True
+                self.translate_btn.setEnabled(False)
+                if self.llama.binary_available():
+                    self.statusBar().showMessage("正在启动本地翻译模型（首次会下载模型）…")
+                else:
+                    self.statusBar().showMessage("正在下载本地引擎与模型（首次较久）…")
+                self._start_local_role("translation")
             return
         self._sync_translator()
         if not self.translator.model:
