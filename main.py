@@ -401,6 +401,7 @@ class MainWindow(QMainWindow):
         self.local_ready: dict[str, bool] = {"translation": False, "ocr": False}
         self._pending_ocr_path: str | None = None
         self._pending_translation = False
+        self._busy = False
 
         self._build_ui()
         self._refresh_models()
@@ -481,6 +482,11 @@ class MainWindow(QMainWindow):
         self.open_btn.clicked.connect(self.open_file)
         actions.addWidget(self.open_btn)
 
+        self.paste_btn = QPushButton("📋  粘贴翻译")
+        self.paste_btn.setToolTip("粘贴剪贴板文字并立即翻译")
+        self.paste_btn.clicked.connect(self.paste_and_translate)
+        actions.addWidget(self.paste_btn)
+
         self.translate_btn = QPushButton("🌐  开始翻译")
         self.translate_btn.setObjectName("primary")
         self.translate_btn.clicked.connect(self.start_translation)
@@ -535,12 +541,15 @@ class MainWindow(QMainWindow):
         left.setObjectName("card")
         lv = QVBoxLayout(left)
         lv.setContentsMargins(14, 12, 14, 14)
-        lv.addLayout(self._make_pane_header("原文", "source"))
+        lv.addLayout(self._make_pane_header("原文 · 可输入", "source"))
         self.source_view = QTextEdit()
-        self.source_view.setReadOnly(True)
+        self.source_view.setReadOnly(False)  # type or paste text directly
+        self.source_view.setPlaceholderText(
+            "在此输入或粘贴要翻译的文字，或打开 / 拖入文件…")
         self.source_view.setFont(QFont(CJK_FONT, self.font_sizes["source"]))
         self.source_view.setAcceptDrops(False)
         self.source_view.viewport().setAcceptDrops(False)
+        self.source_view.textChanged.connect(self._update_translate_enabled)
         lv.addWidget(self.source_view)
         splitter.addWidget(left)
 
@@ -838,7 +847,7 @@ class MainWindow(QMainWindow):
         if role == "translation":
             self.translator.base_url = base_url
             self.translator.model = model_id or "local"
-            self.translate_btn.setEnabled(bool(self.blocks))
+            self._update_translate_enabled()
             self.statusBar().showMessage(f"本地翻译模型就绪 ✓ ({base_url})")
             if self._pending_translation:
                 self._pending_translation = False
@@ -1058,7 +1067,27 @@ class MainWindow(QMainWindow):
 
     # -- translation ----------------------------------------------------
 
+    def paste_and_translate(self):
+        if self._is_busy():
+            return
+        text = QApplication.clipboard().text().strip()
+        if not text:
+            self.statusBar().showMessage("剪贴板没有可粘贴的文字")
+            return
+        self.current_file = None
+        self.translations = []
+        self._set_source(text)
+        self.target_view.clear()
+        self.statusBar().showMessage("已粘贴，开始翻译…")
+        self.start_translation()
+
     def start_translation(self):
+        # source text is the single source of truth (typed / pasted / loaded)
+        text = self._view_text(self.source_view).strip()
+        if not text:
+            return
+        self.blocks = extractors.split_text_into_blocks(text)
+        self.source_text = text
         if not self.blocks:
             return
         if self.backend_mode == "local" and not self.local_ready["translation"]:
@@ -1155,10 +1184,17 @@ class MainWindow(QMainWindow):
         self.worker = None
 
     def _set_busy(self, busy: bool):
-        self.translate_btn.setEnabled(not busy and bool(self.blocks))
+        self._busy = busy
+        self._update_translate_enabled()
         self.open_btn.setEnabled(not busy)
+        self.paste_btn.setEnabled(not busy)
         self.cancel_btn.setEnabled(busy)
-        self.refresh_btn.setEnabled(not busy)
+        self.refresh_btn.setEnabled(not busy and self.backend_mode == "remote")
+
+    def _update_translate_enabled(self):
+        """Translate is available whenever there is source text and no task runs."""
+        has_text = bool(self.source_view.toPlainText().strip())
+        self.translate_btn.setEnabled(has_text and not self._busy)
 
     # -- export ---------------------------------------------------------
 
